@@ -17,9 +17,10 @@ app.use((req, res, next) => {
 
 // ✅ Route GET de test (pour vérifier depuis ton navigateur)
 app.get("/api/quiz", (_req, res) => {
-  res.json({ ok: true, hint: "Utilise POST /api/quiz depuis le quiz" });
+  res.json({ ok: true, message: "Ton API sécurisée fonctionne 🎉" });
 });
 
+// ✅ Route POST (celle que ton quiz va utiliser)
 app.post("/api/quiz", async (req, res) => {
   try {
     const { firstName, email, phone, profile, answers } = req.body || {};
@@ -47,7 +48,7 @@ app.post("/api/quiz", async (req, res) => {
         source: "quiz-entrepreneures",
         timestamp: new Date().toISOString(),
       },
-    });
+    };
 
     // Envoi à Systeme.io
     const sysRes = await fetch(process.env.SYSTEMEIO_API_URL, {
