@@ -1,52 +1,69 @@
-import express from 'express'
-import path from 'path'
-import { fileURLToPath } from 'url'
+import type { VercelRequest, VercelResponse } from '@vercel/node'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const ALLOWED_ORIGIN = "https://ton-domaine-ou-pagequiz.com"; // 👉 remplace ici
 
-const app = express()
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
 
-// Home route - HTML
-app.get('/', (req, res) => {
-  res.type('html').send(`
-    <!doctype html>
-    <html>
-      <head>
-        <meta charset="utf-8"/>
-        <title>Express on Vercel</title>
-        <link rel="stylesheet" href="/style.css" />
-      </head>
-      <body>
-        <nav>
-          <a href="/">Home</a>
-          <a href="/about">About</a>
-          <a href="/api-data">API Data</a>
-          <a href="/healthz">Health</a>
-        </nav>
-        <h1>Welcome to Express on Vercel 🚀</h1>
-        <p>This is a minimal example without a database or forms.</p>
-        <img src="/logo.png" alt="Logo" width="120" />
-      </body>
-    </html>
-  `)
-})
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Méthode non autorisée" });
 
-app.get('/about', function (req, res) {
-  res.sendFile(path.join(__dirname, '..', 'components', 'about.htm'))
-})
+  try {
+    const { firstName, email, phone, profile, answers } = req.body || {};
 
-// Example API endpoint - JSON
-app.get('/api-data', (req, res) => {
-  res.json({
-    message: 'Here is some sample API data',
-    items: ['apple', 'banana', 'cherry'],
-  })
-})
+    if (!firstName || !email || !profile) {
+      return res.status(400).json({ error: "Champs manquants" });
+    }
 
-// Health check
-app.get('/healthz', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
-})
+    const systemePayload = {
+      firstName,
+      email,
+      phone: phone || "",
+      tags: [profileToTag(profile)],
+      fields: {
+        profile,
+        quizAnswers: Array.isArray(answers) ? answers.join(",") : "",
+        source: "quiz-entrepreneures",
+        timestamp: new Date().toISOString(),
+      },
+    };
 
-export default app
+    const sysRes = await fetch(process.env.SYSTEMEIO_API_URL!, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.SYSTEMEIO_API_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(systemePayload),
+    });
+
+    const makeRes = await fetch(process.env.MAKE_WEBHOOK_URL!, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ firstName, email, phone, profile, answers }),
+    });
+
+    if (!sysRes.ok && !makeRes.ok) {
+      return res.status(502).json({ error: "Erreur Systeme.io et Make" });
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (e) {
+    console.error("Erreur serveur :", e);
+    return res.status(500).json({ error: "Erreur serveur interne" });
+  }
+}
+
+function profileToTag(p: string) {
+  const map: Record<string, string> = {
+    A: "femme-architecte",
+    B: "femme-phare",
+    C: "femme-alchimiste",
+    D: "femme-cameleon",
+    E: "femme-diamant",
+  };
+  return map[p] || "quiz-entrepreneures";
+}
