@@ -1,12 +1,18 @@
+// src/index.js
+
 import express from "express";
+
+// Node 18+ (environnement Vercel) fournit déjà fetch globalement.
+// Pas besoin d'installer "node-fetch".
 
 const app = express();
 app.use(express.json());
 
-// ⚠️ Pendant le test, on autorise tout
+// ⚠️ Pendant les tests, on autorise tout. Quand tout fonctionne,
+// remplace "*" par l’URL EXACTE de ta page de quiz (ex. https://ton-sous-domaine.systeme.io)
 const ALLOWED_ORIGIN = "*";
 
-// CORS global
+// Middleware CORS (appliqué à toutes les routes)
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -15,33 +21,39 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ Route GET de test (pour vérifier depuis ton navigateur)
+// Petit mapping profil -> tag Systeme.io
+function profileToTag(p) {
+  const map = {
+    A: "femme-architecte",
+    B: "femme-phare",
+    C: "femme-alchimiste",
+    D: "femme-cameleon",
+    E: "femme-diamant",
+  };
+  return map[p] || "quiz-entrepreneures";
+}
+
+// ✅ Route GET de test (utile pour vérifier depuis le navigateur)
 app.get("/api/quiz", (_req, res) => {
-  res.json({ ok: true, message: "Ton API sécurisée fonctionne 🎉" });
+  res.json({ ok: true, message: "Ton API sécurisée fonctionne 🎉 (utilise POST /api/quiz depuis le quiz)" });
 });
 
-// ✅ Route POST (celle que ton quiz va utiliser)
+// ✅ Route POST (appelée par ton quiz)
 app.post("/api/quiz", async (req, res) => {
   try {
     const { firstName, email, phone, profile, answers } = req.body || {};
 
+    // Validation minimum
     if (!firstName || !email || !profile) {
       return res.status(400).json({ error: "Champs manquants" });
     }
 
-    const tagMap = {
-      A: "femme-architecte",
-      B: "femme-phare",
-      C: "femme-alchimiste",
-      D: "femme-cameleon",
-      E: "femme-diamant",
-    };
-
+    // Payload pour Systeme.io
     const systemePayload = {
       firstName,
       email,
       phone: phone || "",
-      tags: [tagMap[profile] || "quiz-entrepreneures"],
+      tags: [profileToTag(profile)],
       fields: {
         profile,
         quizAnswers: Array.isArray(answers) ? answers.join(",") : "",
@@ -50,7 +62,7 @@ app.post("/api/quiz", async (req, res) => {
       },
     };
 
-    // Envoi à Systeme.io
+    // 1) Envoi à Systeme.io (clé cachée en variable d'environnement)
     const sysRes = await fetch(process.env.SYSTEMEIO_API_URL, {
       method: "POST",
       headers: {
@@ -61,22 +73,32 @@ app.post("/api/quiz", async (req, res) => {
       body: JSON.stringify(systemePayload),
     });
 
-    // Envoi à Make
+    // 2) Envoi à Make (webhook)
     const makeRes = await fetch(process.env.MAKE_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ firstName, email, phone, profile, answers }),
+      body: JSON.stringify({ firstName, email, phone, profile, answers, source: "quiz-entrepreneures" }),
     });
 
+    // Si les deux échouent, on renvoie une erreur
     if (!sysRes.ok && !makeRes.ok) {
-      return res.status(502).json({ error: "Erreur Systeme.io et Make" });
+      const sysTxt = await sysRes.text().catch(() => "");
+      const makeTxt = await makeRes.text().catch(() => "");
+      return res.status(502).json({
+        error: "Erreur Systeme.io et Make",
+        details: { systeme: sysRes.status, systemeBody: sysTxt, make: makeRes.status, makeBody: makeTxt },
+      });
     }
 
+    // Succès
     return res.status(200).json({ success: true });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: "Erreur serveur" });
+    console.error("Erreur serveur :", error);
+    return res.status(500).json({ error: "Erreur serveur interne" });
   }
 });
+
+// (Optionnel) page racine
+app.get("/", (_req, res) => res.send("Bienvenue sur l'API sécurisée du quiz ✨"));
 
 export default app;
