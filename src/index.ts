@@ -3,8 +3,7 @@ import express from "express";
 const app = express();
 app.use(express.json());
 
-// ⚠️ Pour tester, on autorise tout.
-// Quand tout marche, remplace "*" par l’URL exacte de ta page quiz (ex: https://ton-sous-domaine.systeme.io)
+// ⚠️ Pendant le test, on autorise tout
 const ALLOWED_ORIGIN = "*";
 
 // CORS global
@@ -16,36 +15,33 @@ app.use((req, res, next) => {
   next();
 });
 
-// Petit mapping profil -> tag
-function profileToTag(p: string) {
-  const map: Record<string, string> = {
-    A: "femme-architecte",
-    B: "femme-phare",
-    C: "femme-alchimiste",
-    D: "femme-cameleon",
-    E: "femme-diamant",
-  };
-  return map[p] || "quiz-entrepreneures";
-}
-
-// ✅ GET pour vérifier facilement dans le navigateur
+// ✅ Route GET de test (pour vérifier depuis ton navigateur)
 app.get("/api/quiz", (_req, res) => {
-  res.json({ ok: true, hint: "Utilise POST /api/quiz depuis le quiz" });
+  res.json({ ok: true, message: "Ton API sécurisée fonctionne 🎉" });
 });
 
-// ✅ POST appelé par ton quiz
+// ✅ Route POST (celle que ton quiz va utiliser)
 app.post("/api/quiz", async (req, res) => {
   try {
-    const { firstName, email, phone, profile, answers } = (req.body as any) || {};
+    const { firstName, email, phone, profile, answers } = req.body || {};
+
     if (!firstName || !email || !profile) {
       return res.status(400).json({ error: "Champs manquants" });
     }
+
+    const tagMap = {
+      A: "femme-architecte",
+      B: "femme-phare",
+      C: "femme-alchimiste",
+      D: "femme-cameleon",
+      E: "femme-diamant",
+    };
 
     const systemePayload = {
       firstName,
       email,
       phone: phone || "",
-      tags: [profileToTag(profile)],
+      tags: [tagMap[profile] || "quiz-entrepreneures"],
       fields: {
         profile,
         quizAnswers: Array.isArray(answers) ? answers.join(",") : "",
@@ -54,8 +50,8 @@ app.post("/api/quiz", async (req, res) => {
       },
     };
 
-    // 1) Systeme.io
-    const sysRes = await fetch(process.env.SYSTEMEIO_API_URL as string, {
+    // Envoi à Systeme.io
+    const sysRes = await fetch(process.env.SYSTEMEIO_API_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.SYSTEMEIO_API_KEY}`,
@@ -65,11 +61,11 @@ app.post("/api/quiz", async (req, res) => {
       body: JSON.stringify(systemePayload),
     });
 
-    // 2) Make (webhook)
-    const makeRes = await fetch(process.env.MAKE_WEBHOOK_URL as string, {
+    // Envoi à Make
+    const makeRes = await fetch(process.env.MAKE_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ firstName, email, phone, profile, answers, source: "quiz-entrepreneures" }),
+      body: JSON.stringify({ firstName, email, phone, profile, answers }),
     });
 
     if (!sysRes.ok && !makeRes.ok) {
@@ -77,9 +73,9 @@ app.post("/api/quiz", async (req, res) => {
     }
 
     return res.status(200).json({ success: true });
-  } catch (e: any) {
-    console.error("Erreur serveur :", e?.message || e);
-    return res.status(500).json({ error: "Erreur serveur interne" });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
